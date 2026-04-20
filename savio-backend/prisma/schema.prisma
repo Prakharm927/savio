@@ -1,0 +1,348 @@
+// This is your Prisma schema file
+// Learn more: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ========================================
+// CORE TABLES
+// ========================================
+
+model User {
+  id            String   @id @default(cuid())
+  phoneNumber   String   @unique @map("phone_number")
+  email         String?  @unique
+  fullName      String?  @map("full_name")
+  profileImage  String?  @map("profile_image_url")
+  
+  // Location
+  defaultPincode  String?  @map("default_pincode")
+  defaultCity     String?  @map("default_city")
+  
+  // Preferences
+  preferredPlatforms String[] @map("preferred_platforms")
+  hasPrime          Boolean  @default(false) @map("has_prime")
+  hasBBStar         Boolean  @default(false) @map("has_bbstar")
+  
+  // Stats
+  totalComparisons     Int     @default(0) @map("total_comparisons")
+  totalSavingsClaimed  Decimal @default(0) @map("total_savings_claimed") @db.Decimal(10, 2)
+  
+  // Status
+  isActive    Boolean   @default(true) @map("is_active")
+  isVerified  Boolean   @default(false) @map("is_verified")
+  
+  // Timestamps
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+  lastSeenAt  DateTime? @map("last_seen_at")
+  deletedAt   DateTime? @map("deleted_at")
+  
+  // Relations
+  cart           UserCart[]
+  favorites      UserFavorite[]
+  savedLists     SavedList[]
+  comparisons    ComparisonHistory[]
+  
+  @@index([phoneNumber])
+  @@index([defaultPincode])
+  @@map("users")
+}
+
+model SavioProduct {
+  usku              String   @id
+  
+  // Core Info
+  name              String
+  normalizedName    String   @map("normalized_name")
+  brand             String?
+  
+  // Categorization
+  category          String
+  subcategory       String?
+  tags              String[]
+  
+  // Packaging
+  quantity          Decimal? @db.Decimal(10, 3)
+  unit              String?
+  normalizedQuantity Decimal? @map("normalized_quantity") @db.Decimal(10, 3)
+  variant           String?
+  
+  // Content
+  description       String?  @db.Text
+  ingredients       String?  @db.Text
+  nutritionInfo     Json?    @map("nutrition_info")
+  
+  // Media
+  primaryImageUrl   String?  @map("primary_image_url")
+  additionalImages  String[] @map("additional_images")
+  
+  // Quality & Popularity
+  isActive          Boolean  @default(true) @map("is_active")
+  qualityScore      Int      @default(50) @map("quality_score")
+  popularityScore   Int      @default(0) @map("popularity_score")
+  
+  // Timestamps
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+  
+  // Relations
+  platformSkus      PlatformSku[]
+  cartItems         UserCart[]
+  favorites         UserFavorite[]
+  savedListItems    SavedListItem[]
+  
+  @@index([category, isActive])
+  @@index([normalizedName])
+  @@index([popularityScore])
+  @@index([category, isActive, popularityScore(sort: Desc)]) // Production: category browsing
+  @@index([normalizedName, isActive]) // Production: search optimization
+  @@map("savio_products")
+}
+
+model PlatformSku {
+  id                    Int      @id @default(autoincrement())
+  
+  usku                  String
+  platform              String
+  
+  // Platform data
+  platformSkuId         String   @map("platform_sku_id")
+  platformProductUrl    String?  @map("platform_product_url")
+  platformName          String?  @map("platform_name")
+  
+  // Matching
+  matchConfidence       Decimal  @map("match_confidence") @db.Decimal(3, 2)
+  matchType             String?  @map("match_type")
+  
+  // Pricing
+  normalizedUnitPrice   Decimal? @map("normalized_unit_price") @db.Decimal(10, 2)
+  
+  // Availability
+  isActive              Boolean  @default(true) @map("is_active")
+  lastSeenAt            DateTime @default(now()) @map("last_seen_at")
+  consecutive404Count   Int      @default(0) @map("consecutive_404_count")
+  
+  // Timestamps
+  createdAt             DateTime @default(now()) @map("created_at")
+  updatedAt             DateTime @updatedAt @map("updated_at")
+  
+  // Relations
+  product               SavioProduct @relation(fields: [usku], references: [usku], onDelete: Cascade)
+  prices                PriceLatest[]
+  
+  @@unique([platform, platformSkuId])
+  @@index([usku, isActive])
+  @@index([platform, isActive])
+  @@index([usku, isActive, platform]) // Production: multi-platform lookup
+  @@map("platform_skus")
+}
+
+model PriceLatest {
+  id                Int      @id @default(autoincrement())
+  
+  platformSkuId     Int      @map("platform_sku_id")
+  pincode           String
+  
+  // Pricing
+  price             Decimal  @db.Decimal(10, 2)
+  mrp               Decimal? @db.Decimal(10, 2)
+  discountPercent   Decimal? @map("discount_percent") @db.Decimal(5, 2)
+  
+  // Availability
+  inStock           Boolean  @default(true) @map("in_stock")
+  stockStatus       String   @default("in_stock") @map("stock_status")
+  
+  // Confidence
+  confidenceScore   Decimal  @default(0.80) @map("confidence_score") @db.Decimal(3, 2)
+  dataSource        String   @default("scraper") @map("data_source")
+  
+  // Timestamps
+  scrapedAt         DateTime @default(now()) @map("scraped_at")
+  expiresAt         DateTime @map("expires_at")
+  
+  // Relations
+  platformSku       PlatformSku @relation(fields: [platformSkuId], references: [id], onDelete: Cascade)
+  
+  @@unique([platformSkuId, pincode])
+  @@index([platformSkuId, pincode])
+  @@index([expiresAt])
+  @@index([pincode, scrapedAt(sort: Desc)]) // Production: recent prices by location
+  @@index([platformSkuId, pincode, expiresAt]) // Production: price lookup with expiry
+  @@map("prices_latest")
+}
+
+model DeliveryRule {
+  id                      Int      @id @default(autoincrement())
+  
+  platform                String
+  city                    String?
+  pincodePrefix           String?  @map("pincode_prefix")
+  
+  // Fees
+  freeDeliveryThreshold   Decimal? @map("free_delivery_threshold") @db.Decimal(10, 2)
+  baseDeliveryFee         Decimal? @map("base_delivery_fee") @db.Decimal(10, 2)
+  platformFee             Decimal  @default(0) @map("platform_fee") @db.Decimal(10, 2)
+  taxPercent              Decimal  @default(0) @map("tax_percent") @db.Decimal(5, 2)
+  
+  // ETA
+  typicalEtaLabel         String?  @map("typical_eta_label")
+  etaRangeMin             Int?     @map("eta_range_min")
+  etaRangeMax             Int?     @map("eta_range_max")
+  
+  // Membership
+  hasMembershipDiscount   Boolean  @default(false) @map("has_membership_discount")
+  membershipTypes         String[] @map("membership_types")
+  
+  // Metadata
+  isActive                Boolean  @default(true) @map("is_active")
+  confidence              String   @default("estimated")
+  
+  // Timestamps
+  createdAt               DateTime @default(now()) @map("created_at")
+  updatedAt               DateTime @updatedAt @map("updated_at")
+  
+  @@unique([platform, city, pincodePrefix])
+  @@index([platform, city])
+  @@index([platform, pincodePrefix, isActive]) // Production: delivery rule lookup
+  @@map("delivery_rules")
+}
+
+// ========================================
+// USER DATA TABLES
+// ========================================
+
+model UserCart {
+  id        Int      @id @default(autoincrement())
+  
+  userId    String   @map("user_id")
+  usku      String
+  
+  quantity  Int      @default(1)
+  
+  // Timestamps
+  addedAt   DateTime @default(now()) @map("added_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  
+  // Relations
+  user      User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  product   SavioProduct @relation(fields: [usku], references: [usku], onDelete: Cascade)
+  
+  @@unique([userId, usku])
+  @@index([userId])
+  @@map("user_carts")
+}
+
+model UserFavorite {
+  id        Int      @id @default(autoincrement())
+  
+  userId    String   @map("user_id")
+  usku      String
+  
+  note      String?  @db.Text
+  
+  // Timestamps
+  createdAt DateTime @default(now()) @map("created_at")
+  
+  // Relations
+  user      User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  product   SavioProduct @relation(fields: [usku], references: [usku], onDelete: Cascade)
+  
+  @@unique([userId, usku])
+  @@index([userId])
+  @@map("user_favorites")
+}
+
+model SavedList {
+  id                  String   @id @default(cuid())
+  
+  userId              String   @map("user_id")
+  
+  name                String
+  description         String?  @db.Text
+  
+  // Metadata
+  isActive            Boolean  @default(true) @map("is_active")
+  isRecurring         Boolean  @default(false) @map("is_recurring")
+  recurrencePattern   String?  @map("recurrence_pattern")
+  
+  // Stats
+  itemCount           Int      @default(0) @map("item_count")
+  totalEstimatedCost  Decimal? @map("total_estimated_cost") @db.Decimal(10, 2)
+  
+  // Timestamps
+  createdAt           DateTime @default(now()) @map("created_at")
+  updatedAt           DateTime @updatedAt @map("updated_at")
+  lastUsedAt          DateTime? @map("last_used_at")
+  
+  // Relations
+  user                User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  items               SavedListItem[]
+  
+  @@index([userId])
+  @@map("saved_lists")
+}
+
+model SavedListItem {
+  id        Int      @id @default(autoincrement())
+  
+  listId    String   @map("list_id")
+  usku      String
+  
+  quantity  Int      @default(1)
+  position  Int      @default(0)
+  
+  // Timestamps
+  createdAt DateTime @default(now()) @map("created_at")
+  
+  // Relations
+  list      SavedList    @relation(fields: [listId], references: [id], onDelete: Cascade)
+  product   SavioProduct @relation(fields: [usku], references: [usku], onDelete: Cascade)
+  
+  @@unique([listId, usku])
+  @@index([listId])
+  @@map("saved_list_items")
+}
+
+model ComparisonHistory {
+  id                String   @id @default(cuid())
+  
+  userId            String?  @map("user_id")
+  
+  // Comparison details
+  itemCount         Int      @map("item_count")
+  itemsCompared     Json     @map("items_compared")
+  
+  totalValueMin     Decimal? @map("total_value_min") @db.Decimal(10, 2)
+  totalValueMax     Decimal? @map("total_value_max") @db.Decimal(10, 2)
+  
+  // Results
+  platformsChecked  String[] @map("platforms_checked")
+  cheapestPlatform  String?  @map("cheapest_platform")
+  cheapestTotal     Decimal? @map("cheapest_total") @db.Decimal(10, 2)
+  fastestPlatform   String?  @map("fastest_platform")
+  selectedPlatform  String?  @map("selected_platform")
+  
+  // Savings
+  potentialSavings  Decimal? @map("potential_savings") @db.Decimal(10, 2)
+  
+  // Context
+  pincode           String?
+  comparisonType    String   @default("cart") @map("comparison_type")
+  
+  // Timestamps
+  createdAt         DateTime @default(now()) @map("created_at")
+  
+  // Relations
+  user              User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  
+  @@index([userId, createdAt])
+  @@index([createdAt])
+  @@map("comparison_history")
+}

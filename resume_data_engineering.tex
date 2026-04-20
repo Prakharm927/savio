@@ -1,0 +1,194 @@
+\documentclass[10pt, letterpaper]{article}
+
+% -----------------------------------
+% Packages and Setup
+% -----------------------------------
+\usepackage[
+    ignoreheadfoot,
+    top=0.5 cm,
+    bottom=0.5 cm,
+    left=0.9 cm,
+    right=0.9 cm,
+    footskip=0.5 cm
+]{geometry}
+\usepackage{titlesec, tabularx, array, xcolor, enumitem, fontawesome5, amsmath, hyperref, eso-pic, calc, bookmark, lastpage, changepage, paracol, ifthen, needspace, iftex}
+
+\definecolor{primaryColor}{RGB}{0, 0, 0}
+\hypersetup{
+    colorlinks=true,
+    urlcolor=primaryColor,
+    linkcolor=primaryColor
+}
+
+\usepackage{charter}
+\raggedright
+\pagestyle{empty}
+\setlength{\parindent}{0pt}
+\setlength{\columnsep}{0.10cm}
+\pagenumbering{gobble}
+
+% Section Formatting
+\titleformat{\section}{\bfseries\large}{}{0pt}{}[\vspace{1pt}\titlerule]
+\titlespacing{\section}{-1pt}{0.18cm}{0.1cm}
+
+\renewcommand\labelitemi{$\vcenter{\hbox{\small$\bullet$}}$}
+
+% -----------------------------------
+% Custom Environments
+% -----------------------------------
+\newenvironment{highlights}{
+    \begin{itemize}[topsep=0pt, parsep=0pt, partopsep=0pt, itemsep=1.2pt, leftmargin=10pt]
+}{
+    \end{itemize}
+}
+
+\newenvironment{onecolentry}{
+    \begin{adjustwidth}{0cm}{0cm}
+}{
+    \end{adjustwidth}
+}
+
+\newenvironment{twocolentry}[2][]{
+    \onecolentry
+    \def\secondColumn{#2}
+    \setcolumnwidth{\fill, 4.5cm}
+    \begin{paracol}{2}
+}{
+    \switchcolumn \raggedleft \secondColumn
+    \end{paracol}
+    \endonecolentry
+}
+
+\newenvironment{header}{
+    \centering\linespread{1.2}
+}{
+}
+
+% -----------------------------------
+% Header
+% -----------------------------------
+\begin{document}
+\begin{header}
+    \fontsize{20 pt}{20 pt}\selectfont \textbf{Prakhar Mishra}\\[2 pt]
+    \vspace{2 pt}
+    \normalsize
+    \href{mailto:prakharmishra468@gmail.com}{\faEnvelope \hspace{1pt} prakharmishra468@gmail.com}%
+    \kern 8 pt \textbar{} \kern 8 pt%
+    \faPhone \hspace{2pt} +91 74890 21123%
+    \kern 8 pt \textbar{} \kern 8 pt%
+    \href{https://linkedin.com/in/prakhar-mishra468}{\faLinkedin \hspace{2pt} prakhar-mishra468}%
+    \kern 8 pt \textbar{} \kern 8 pt%
+    \href{https://github.com/Prakharm927}{\faGithub \hspace{2pt} Prakharm927}
+\end{header}
+
+\vspace{1 pt}
+
+% -----------------------------------
+% SUMMARY
+% -----------------------------------
+\section{Summary}
+\begin{onecolentry}
+CS undergrad (2026) with a strong focus on building and deploying backend systems that actually work in production. I've built \textbf{ETL pipelines, REST APIs}, and \textbf{microservices} with real traffic and monitoring. Comfortable with \textbf{Python, Java, Docker}, and databases (SQL, NoSQL). I enjoy turning business requirements into functional data solutions—from data ingestion workflows to distributed file transfer systems. Experienced in the full development cycle: design, implementation, testing, and deployment with \textbf{CI/CD automation}.
+\end{onecolentry}
+
+% -----------------------------------
+% TECHNICAL SKILLS
+% -----------------------------------
+\section{Technical Skills}
+\begin{onecolentry}
+\textbf{Programming \& Development:} Python, Java, C++, SQL, JavaScript, Spring Boot, FastAPI, REST APIs \\
+\textbf{Databases:} MySQL, NoSQL (MongoDB, Redis), Database Design, Indexing, Query Optimization \\
+\textbf{Data Engineering:} ETL Pipelines, Data Ingestion, Data Validation, File System Processing, Batch Processing \\
+\textbf{Platform \& DevOps:} Linux/Unix, Docker, Git, CI/CD (GitHub Actions), System Monitoring \\
+\textbf{Software Engineering:} Agile/Scrum, Unit Testing (JUnit, pytest), Technical Documentation, Code Reviews \\
+\textbf{Tools:} Postman, VS Code, npm/Vite, Docker Compose
+\end{onecolentry}
+
+% -----------------------------------
+% PROJECTS
+% -----------------------------------
+\section{Projects}
+
+\begin{twocolentry}{Python | CI/CD | Docker | Monitoring}
+    \textbf{OpenHealth — Production-Grade AI Health Prediction Service} \href{https://github.com/Prakharm927/OpenHealth}{\faGithub}
+\end{twocolentry}
+\begin{highlights}
+    \item Architected \textbf{FastAPI microservice} deploying 7 ML models with REST endpoints, model versioning, and one-command rollbacks—shipped to production with 99.9\% uptime.
+    \item Built \textbf{CI/CD pipeline} (GitHub Actions) automating linting, testing, and Docker builds, cutting deployment time from hours to minutes while preventing regressions.
+    \item Engineered \textbf{monitoring layer} tracking p50/p95/p99 latency, confidence scores, and data drift detection for proactive model retraining and system health visibility.
+    \item Containerized with \textbf{Docker multi-stage builds} (<500MB image), enabling Kubernetes horizontal scaling and reproducible deployments across environments.
+\end{highlights}
+
+\vspace{0.12cm}
+
+\begin{twocolentry}{Python | ETL Pipeline | Data Quality}
+    \textbf{Krishi Vaani — Audio Data Ingestion \& Transformation Pipeline} \href{https://github.com/Prakharm927/Krishi-Vaani}{\faGithub}
+\end{twocolentry}
+\begin{highlights}
+    \item Built end-to-end \textbf{Python ETL pipeline} ingesting and transforming 500+ unstructured audio files with automated format validation, noise detection, and metadata extraction—100\% data integrity to ML inference.
+    \item Designed RESTful APIs with technical documentation bridging frontend UI and data processing backend, enabling seamless cross-functional collaboration.
+    \item Automated file-based ingestion workflow, reducing manual preprocessing by 90\% and creating reusable framework for batch audio processing.
+\end{highlights}
+
+\vspace{0.12cm}
+
+\begin{twocolentry}{Java | Distributed Systems | Performance}
+    \textbf{NearMe — Peer-to-Peer File Transfer System} \href{https://github.com/Prakharm927/NearMe}{\faGithub}
+\end{twocolentry}
+\begin{highlights}
+    \item Engineered \textbf{Java NIO zero-copy} file transfer using FileChannel.transferTo(), hitting 1.5 GB/s throughput (63\% improvement) with 93\% CPU reduction vs. standard I/O.
+    \item Implemented UDP peer discovery protocol for \textbf{decentralized architecture}, eliminating single points of failure and enabling horizontal scalability across local networks.
+    \item Used ConcurrentHashMap for lock-free peer state management during high-concurrency transfers, with comprehensive benchmarking and technical documentation.
+\end{highlights}
+
+\vspace{0.12cm}
+
+\begin{twocolentry}{JavaScript | Vite | Production Deploy}
+    \textbf{Cab Compare — Real-Time Fare Aggregation Platform} \href{https://github.com/Prakharm927/cab-compare-for-all-cabs}{\faGithub}
+\end{twocolentry}
+\begin{highlights}
+    \item Built and deployed production app (\textbf{Vite + vanilla JS}) aggregating real-time fares from Uber, Ola, Rapido, Namma Yatri APIs across Bangalore, Mumbai, Delhi markets.
+    \item Maintained \textbf{7+ production releases} with zero-downtime deployments, comprehensive API error handling, and 99\% uptime through timeout management and graceful degradation.
+    \item Designed authentication-free UX with Google Maps Distance Matrix integration, reducing friction and enabling instant fare comparison without registration.
+\end{highlights}
+
+% -----------------------------------
+% EDUCATION
+% -----------------------------------
+\section{Education}
+\begin{twocolentry}{Dec 2022 – May 2026}
+    \textbf{BMS Institute of Technology and Management}
+\end{twocolentry}
+\begin{onecolentry}
+    B.Tech in Computer Science and Engineering \textbar{} CGPA: 8.0/10
+\end{onecolentry}
+
+\vspace{0.08cm}
+
+\begin{twocolentry}{2022}
+    \textbf{Delhi Public School, Durg}
+\end{twocolentry}
+\begin{onecolentry}
+    Class 12 (CBSE) \textbar{} 80\%
+\end{onecolentry}
+
+% -----------------------------------
+% ACHIEVEMENTS
+% -----------------------------------
+\section{Achievements}
+\begin{highlights}
+    \item \textbf{Finalist – Srishti 2025 National Hackathon:} Led backend architecture and data integration for prototype under 48-hour constraints, managing agile development cycle.
+    \item \textbf{Team Lead – AI Health \& Wellness Hackathon:} Directed cross-functional engineering strategy to integrate ML models with production application infrastructure.
+    \item \textbf{1st Rank – IIT Bombay Campus Ambassador Quiz (2021):} Secured top rank among nationwide participants in technical and aptitude assessment.
+\end{highlights}
+
+% -----------------------------------
+% PROFESSIONAL CERTIFICATIONS
+% -----------------------------------
+\section{Professional Certifications}
+\begin{highlights}
+    \item \textbf{Meta – Introduction to Back-End Development} \href{https://coursera.org/share/2eba42fa7f25697b67aa6db80c581ed6}{\faLink}
+    \item \textbf{Google – Foundations of Project Management} \href{https://coursera.org/share/c48322f244b9763d2fa143bc23ac9d26}{\faLink}
+\end{highlights}
+
+\end{document}

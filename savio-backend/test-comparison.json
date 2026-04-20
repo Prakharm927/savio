@@ -1,0 +1,13 @@
+{
+    "items": [
+        {
+            "usku": "USKU-MILK-001",
+            "quantity": 2
+        },
+        {
+            "usku": "USKU-BREAD-001",
+            "quantity": 1
+        }
+    ],
+    "pincode": "560001"
+}
