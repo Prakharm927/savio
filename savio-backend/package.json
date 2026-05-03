@@ -14,7 +14,8 @@
     "db:migrate": "prisma migrate dev",
     "lint": "eslint . --ext .ts",
     "format": "prettier --write \"src/**/*.ts\" \"prisma/**/*.ts\"",
-    "stress-test": "tsx stress-test.ts"
+    "stress-test": "tsx stress-test.ts",
+    "test:parser": "tsx src/parsers/__tests__/zepto.parser.test.ts"
   },
   "keywords": [
     "savio",
