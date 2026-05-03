@@ -6,7 +6,7 @@ export const errorHandler = (
     err: any,
     req: Request,
     res: Response,
-    next: NextFunction
+    _next: NextFunction
 ) => {
     logger.error('Error:', {
         message: err.message,
@@ -48,7 +48,7 @@ export const errorHandler = (
     const statusCode = err.statusCode || 500;
     const message = err.message || 'Internal server error';
 
-    res.status(statusCode).json({
+    return res.status(statusCode).json({
         success: false,
         message,
         ...(process.env.NODE_ENV === 'development' && { stack: err.stack }),
@@ -56,7 +56,7 @@ export const errorHandler = (
 };
 
 export const notFound = (req: Request, res: Response) => {
-    res.status(404).json({
+    return res.status(404).json({
         success: false,
         message: `Route ${req.originalUrl} not found`,
     });

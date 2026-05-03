@@ -4,11 +4,120 @@ import { catchAsync } from '../utils/catchAsync';
 import { sendSuccess, sendError } from '../utils/response';
 import { getCachedData, setCachedData } from '../config/redis';
 import { ProductWithPrices, PriceInfo } from '../types';
+import {
+    buildPlatformDeepLink,
+    buildPlatformLinks,
+    buildPlatformQueryText,
+    buildPlatformSearchFallbacks,
+} from '../utils/platformLinks';
+
+function getAgeMinutes(timestamp?: Date) {
+    if (!timestamp) {
+        return Number.POSITIVE_INFINITY;
+    }
+
+    return Math.max(0, Math.round((Date.now() - timestamp.getTime()) / 60000));
+}
+
+function getConfidenceFromAge(ageMinutes: number): 'high' | 'medium' | 'low' {
+    if (ageMinutes <= 5) {
+        return 'high';
+    }
+
+    if (ageMinutes <= 15) {
+        return 'medium';
+    }
+
+    return 'low';
+}
+
+function formatLastCheckedLabel(ageMinutes: number) {
+    if (!Number.isFinite(ageMinutes)) {
+        return 'Checking failed';
+    }
+
+    if (ageMinutes <= 1) {
+        return 'Updated just now';
+    }
+
+    if (ageMinutes < 60) {
+        return `Updated ${ageMinutes}m ago`;
+    }
+
+    return `Updated ${Math.round(ageMinutes / 60)}h ago`;
+}
+
+function toPriceInfo(
+    sku: {
+        id: number;
+        platform: string;
+        platformProductUrl: string | null;
+        prices: Array<{
+            price: any;
+            mrp: any;
+            discountPercent: any;
+            inStock: boolean;
+            stockStatus: string;
+            scrapedAt: Date;
+        }>;
+    },
+    product: { brand: string | null; name: string }
+): PriceInfo {
+    const latestPrice = sku.prices[0];
+    const searchUrl = buildPlatformSearchFallbacks(
+        buildPlatformQueryText(product.brand, product.name)
+    )[sku.platform as keyof ReturnType<typeof buildPlatformSearchFallbacks>];
+
+    if (!latestPrice) {
+        return {
+            platform: sku.platform,
+            platformSkuId: sku.id,
+            price: null,
+            inStock: false,
+            stockStatus: 'checking_failed',
+            scrapedAt: new Date(0),
+            status: 'unknown',
+            confidence: 'low',
+            lastCheckedLabel: 'Checking failed',
+            reason: 'Latest platform snapshot is unavailable',
+            productUrl: sku.platformProductUrl || undefined,
+            searchUrl,
+            deepLink: buildPlatformDeepLink(sku.platform),
+        };
+    }
+
+    const ageMinutes = getAgeMinutes(latestPrice.scrapedAt);
+
+    return {
+        platform: sku.platform,
+        platformSkuId: sku.id,
+        price: latestPrice.inStock ? parseFloat(latestPrice.price.toString()) : null,
+        mrp: latestPrice.mrp ? parseFloat(latestPrice.mrp.toString()) : undefined,
+        discountPercent: latestPrice.discountPercent
+            ? parseFloat(latestPrice.discountPercent.toString())
+            : undefined,
+        inStock: latestPrice.inStock,
+        stockStatus: latestPrice.stockStatus,
+        scrapedAt: latestPrice.scrapedAt,
+        status: latestPrice.inStock ? 'available' : 'unavailable',
+        confidence: getConfidenceFromAge(ageMinutes),
+        lastCheckedLabel: formatLastCheckedLabel(ageMinutes),
+        reason: latestPrice.inStock
+            ? undefined
+            : latestPrice.stockStatus === 'out_of_stock'
+                ? 'Out of stock'
+                : 'Not available in your area',
+        productUrl: sku.platformProductUrl || undefined,
+        searchUrl,
+        deepLink: buildPlatformDeepLink(sku.platform),
+    };
+}
 
 export const getAllProducts = catchAsync(async (req: Request, res: Response) => {
     const {
         page = '1',
         limit = '20',
+        pincode = process.env.DEFAULT_PINCODE || '560001',
         category,
         search,
         sortBy = 'popularityScore',
@@ -42,9 +151,14 @@ export const getAllProducts = catchAsync(async (req: Request, res: Response) => 
             include: {
                 platformSkus: {
                     where: { isActive: true },
-                    select: {
-                        platform: true,
-                        platformSkuId: true,
+                    include: {
+                        prices: {
+                            where: {
+                                pincode: pincode as string,
+                            },
+                            orderBy: { scrapedAt: 'desc' },
+                            take: 1,
+                        },
                     },
                 },
             },
@@ -52,8 +166,27 @@ export const getAllProducts = catchAsync(async (req: Request, res: Response) => 
         prisma.savioProduct.count({ where }),
     ]);
 
+    const enrichedProducts = products.map((product) => {
+        const prices = product.platformSkus.map((sku) => toPriceInfo(sku, product));
+
+        return {
+            ...product,
+            prices,
+            platformSkus: product.platformSkus.map((sku) => ({
+                id: sku.id,
+                platform: sku.platform,
+                platformSkuId: sku.platformSkuId,
+                platformProductUrl: sku.platformProductUrl,
+            })),
+            platformLinks: buildPlatformLinks(product.platformSkus),
+            platformSearchFallbacks: buildPlatformSearchFallbacks(
+                buildPlatformQueryText(product.brand, product.name)
+            ),
+        };
+    });
+
     sendSuccess(res, {
-        products,
+        products: enrichedProducts,
         pagination: {
             page: parseInt(page as string),
             limit: parseInt(limit as string),
@@ -114,10 +247,10 @@ export const getProductPrices = catchAsync(async (req: Request, res: Response) =
             platformSkus: {
                 where: { isActive: true },
                 include: {
+                    // Preserve exact product URLs for handoff
                     prices: {
                         where: {
                             pincode: pincode as string,
-                            expiresAt: { gt: new Date() },
                         },
                         orderBy: { scrapedAt: 'desc' },
                         take: 1,
@@ -133,19 +266,7 @@ export const getProductPrices = catchAsync(async (req: Request, res: Response) =
 
     // Transform data
     const prices: PriceInfo[] = product.platformSkus
-        .filter((sku) => sku.prices.length > 0)
-        .map((sku) => ({
-            platform: sku.platform,
-            platformSkuId: sku.id,
-            price: parseFloat(sku.prices[0].price.toString()),
-            mrp: sku.prices[0].mrp ? parseFloat(sku.prices[0].mrp.toString()) : undefined,
-            discountPercent: sku.prices[0].discountPercent
-                ? parseFloat(sku.prices[0].discountPercent.toString())
-                : undefined,
-            inStock: sku.prices[0].inStock,
-            stockStatus: sku.prices[0].stockStatus,
-            scrapedAt: sku.prices[0].scrapedAt,
-        }));
+        .map((sku) => toPriceInfo(sku, product));
 
     const result: ProductWithPrices = {
         usku: product.usku,
@@ -155,6 +276,10 @@ export const getProductPrices = catchAsync(async (req: Request, res: Response) =
         quantity: product.quantity ? parseFloat(product.quantity.toString()) : undefined,
         unit: product.unit || undefined,
         primaryImageUrl: product.primaryImageUrl || undefined,
+        platformLinks: buildPlatformLinks(product.platformSkus),
+        platformSearchFallbacks: buildPlatformSearchFallbacks(
+            buildPlatformQueryText(product.brand, product.name)
+        ),
         prices,
     };
 

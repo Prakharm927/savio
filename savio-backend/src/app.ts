@@ -5,6 +5,10 @@ import { errorHandler, notFound } from './middleware/errorHandler';
 import { globalLimiter, perIpLimiter, comparisonLimiter, rateLimiterErrorHandler } from './middleware/rateLimiter';
 import productsRouter from './routes/products.routes';
 import comparisonRouter from './routes/comparison.routes';
+import liveSnapshotsRouter from './routes/liveSnapshots.routes';
+import parserConfigRouter, { adminParserConfigRouter } from './routes/parserConfig.routes';
+import adminRouter from './routes/admin.routes';
+import { requireAdmin } from './middleware/adminAuth';
 
 const app: Express = express();
 
@@ -35,10 +39,10 @@ if (process.env.NODE_ENV === 'production') {
 }
 
 // Health check (no rate limit)
-app.get('/health', (req, res) => {
+app.get('/health', (_req, res) => {
     res.status(200).json({
         success: true,
-        message: 'Prixo API is running',
+        message: 'Savio API is running',
         timestamp: new Date().toISOString(),
         environment: process.env.NODE_ENV || 'development',
     });
@@ -46,9 +50,17 @@ app.get('/health', (req, res) => {
 
 // API routes
 app.use('/api/products', productsRouter);
+app.use('/api/live-snapshots', liveSnapshotsRouter);
 
 // Comparison endpoint with stricter rate limiting
 app.use('/api/comparison', comparisonLimiter, comparisonRouter);
+
+// Parser config endpoints (public GET + admin-protected mutations)
+app.use('/api/parser-config', parserConfigRouter);
+app.use('/api/admin/parser-config', requireAdmin, adminParserConfigRouter);
+
+// Admin dashboard endpoints (products, snapshots, health)
+app.use('/api/admin', requireAdmin, adminRouter);
 
 // 404 handler
 app.use(notFound);

@@ -501,9 +501,76 @@ savio-backend/
 
 ---
 
-## 📝 License
+## 🔧 Parser Config Management
 
-ISC
+Parser configs let you update platform-specific selectors and patterns without shipping a new APK. Each platform has independently versioned configs.
+
+### Environment Setup
+
+Add `ADMIN_TOKEN` to your `.env`:
+
+```env
+ADMIN_TOKEN="your-secret-admin-token"
+```
+
+### Endpoints
+
+#### Get Active Config (Public)
+
+```bash
+curl http://localhost:3000/api/parser-config/zepto
+```
+
+Response: `{ version, config, notes, lastUpdated }`
+
+#### Get Version History (Admin)
+
+```bash
+curl -H "Authorization: Bearer $ADMIN_TOKEN" \
+  http://localhost:3000/api/parser-config/zepto/versions
+```
+
+#### Create New Config Version (Admin)
+
+```bash
+curl -X POST http://localhost:3000/api/admin/parser-config \
+  -H "Authorization: Bearer $ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "platform": "zepto",
+    "config": {
+      "selectors": { "productName": "TextView.product_name" },
+      "patterns": { "price": "₹(\\d+)" },
+      "ignore": ["ad_banner"]
+    },
+    "notes": "Added product name selector from tree dump analysis",
+    "activate": true
+  }'
+```
+
+#### Activate a Specific Version (Admin)
+
+```bash
+curl -X PUT -H "Authorization: Bearer $ADMIN_TOKEN" \
+  http://localhost:3000/api/admin/parser-config/<config-id>/activate
+```
+
+### Seed Initial Configs
+
+```bash
+npx tsx prisma/seedParserConfigs.ts
+```
+
+Creates v1 empty configs for all 7 platforms (zepto, blinkit, instamart, bigbasket, jiomart, amazon, flipkart).
+
+### Publishing Workflow
+
+1. Capture a tree dump from the target platform (via the accessibility service)
+2. Analyse the dump to identify selector paths and patterns
+3. POST a new config version with `activate: false` (dry run)
+4. Review the config in the admin dashboard
+5. Activate via PUT or by setting `activate: true` on creation
+6. The Redis cache (1h TTL) will serve the new config to all clients
 
 ---
 

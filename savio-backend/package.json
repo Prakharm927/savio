@@ -1,7 +1,7 @@
 {
-  "name": "prixo-backend",
+  "name": "savio-backend",
   "version": "1.0.0",
-  "description": "Prixo API - Price comparison backend with PostgreSQL and Redis",
+  "description": "Savio API - Price comparison backend with PostgreSQL and Redis",
   "main": "dist/server.js",
   "scripts": {
     "dev": "tsx watch src/server.ts",
@@ -17,12 +17,12 @@
     "stress-test": "tsx stress-test.ts"
   },
   "keywords": [
-    "prixo",
+    "savio",
     "price-comparison",
     "grocery",
     "api"
   ],
-  "author": "Prixo Team",
+  "author": "Savio Team",
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {

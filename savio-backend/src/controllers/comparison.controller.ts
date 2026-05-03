@@ -1,14 +1,78 @@
+import { Prisma } from '@prisma/client';
 import { Request, Response } from 'express';
 import prisma from '../config/database';
 import { catchAsync } from '../utils/catchAsync';
 import { sendSuccess, sendError } from '../utils/response';
 import { getCachedData, setCachedData } from '../config/redis';
 import {
+    ComparisonItemStatus,
     ComparisonRequest,
     ComparisonResponse,
     PlatformComparison,
 } from '../types';
 import crypto from 'crypto';
+
+const SUPPORTED_COMPARISON_PLATFORMS = ['bigbasket', 'jiomart', 'amazon', 'flipkart', 'zepto'] as const;
+
+function getAgeMinutes(timestamp?: Date) {
+    if (!timestamp) {
+        return Number.POSITIVE_INFINITY;
+    }
+
+    return Math.max(0, Math.round((Date.now() - timestamp.getTime()) / 60000));
+}
+
+function getConfidenceFromAge(ageMinutes: number): {
+    confidence: 'high' | 'medium' | 'low';
+    score: number;
+} {
+    if (ageMinutes <= 5) {
+        return { confidence: 'high', score: 3 };
+    }
+
+    if (ageMinutes <= 15) {
+        return { confidence: 'medium', score: 2 };
+    }
+
+    return { confidence: 'low', score: 1 };
+}
+
+function formatLastCheckedLabel(ageMinutes: number) {
+    if (!Number.isFinite(ageMinutes)) {
+        return 'Checking failed';
+    }
+
+    if (ageMinutes <= 1) {
+        return 'Updated just now';
+    }
+
+    if (ageMinutes < 60) {
+        return `Updated ${ageMinutes}m ago`;
+    }
+
+    const hours = Math.round(ageMinutes / 60);
+    return `Updated ${hours}h ago`;
+}
+
+function comparePlatforms(a: PlatformComparison, b: PlatformComparison) {
+    if (a.allItemsAvailable !== b.allItemsAvailable) {
+        return a.allItemsAvailable ? -1 : 1;
+    }
+
+    if (a.itemsInStock !== b.itemsInStock) {
+        return b.itemsInStock - a.itemsInStock;
+    }
+
+    if (a.total !== b.total) {
+        return a.total - b.total;
+    }
+
+    if ((a.etaMinutes || Number.POSITIVE_INFINITY) !== (b.etaMinutes || Number.POSITIVE_INFINITY)) {
+        return (a.etaMinutes || Number.POSITIVE_INFINITY) - (b.etaMinutes || Number.POSITIVE_INFINITY);
+    }
+
+    return b.confidenceScore - a.confidenceScore;
+}
 
 export const compareCart = catchAsync(async (req: Request, res: Response) => {
     const { items, pincode, userId }: ComparisonRequest = req.body;
@@ -50,7 +114,6 @@ export const compareCart = catchAsync(async (req: Request, res: Response) => {
                     prices: {
                         where: {
                             pincode: pincode,
-                            expiresAt: { gt: new Date() },
                         },
                         orderBy: { scrapedAt: 'desc' },
                         take: 1,
@@ -60,53 +123,154 @@ export const compareCart = catchAsync(async (req: Request, res: Response) => {
         },
     });
 
-    // Build platform-wise data
-    const platformData: Map<string, any> = new Map();
-    const platforms = new Set<string>();
+    const productsByUsku = new Map(productsWithPrices.map((product) => [product.usku, product]));
 
-    for (const product of productsWithPrices) {
-        const itemQuantity = items.find((i) => i.usku === product.usku)?.quantity || 1;
+    const platformData = new Map<
+        string,
+        {
+            items: ComparisonItemStatus[];
+            subtotal: number;
+            itemsInStock: number;
+            itemsOutOfStock: number;
+            itemsUnknown: number;
+            unavailableItems: string[];
+            unknownItems: string[];
+            maxAgeMinutes: number;
+            minConfidenceScore: number;
+        }
+    >();
 
-        for (const sku of product.platformSkus) {
-            platforms.add(sku.platform);
+    SUPPORTED_COMPARISON_PLATFORMS.forEach((platform) => {
+        platformData.set(platform, {
+            items: [],
+            subtotal: 0,
+            itemsInStock: 0,
+            itemsOutOfStock: 0,
+            itemsUnknown: 0,
+            unavailableItems: [],
+            unknownItems: [],
+            maxAgeMinutes: 0,
+            minConfidenceScore: 3,
+        });
+    });
 
-            if (!platformData.has(sku.platform)) {
-                platformData.set(sku.platform, {
-                    items: [],
-                    subtotal: 0,
-                    itemsInStock: 0,
-                    itemsOutOfStock: 0,
-                    unavailableItems: [],
+    for (const cartItem of items) {
+        const product = productsByUsku.get(cartItem.usku);
+
+        for (const platform of SUPPORTED_COMPARISON_PLATFORMS) {
+            const platformInfo = platformData.get(platform)!;
+
+            if (!product) {
+                platformInfo.itemsOutOfStock += 1;
+                platformInfo.unavailableItems.push(cartItem.usku);
+                platformInfo.items.push({
+                    usku: cartItem.usku,
+                    name: cartItem.usku,
+                    quantity: cartItem.quantity,
+                    price: null,
+                    total: null,
+                    available: false,
+                    status: 'unavailable',
+                    stockStatus: 'not_in_catalog',
+                    reason: 'This product is not mapped in the Savio catalog yet',
+                    lastCheckedLabel: 'Catalog mapping missing',
+                    confidence: 'low',
                 });
+                platformInfo.minConfidenceScore = Math.min(platformInfo.minConfidenceScore, 1);
+                continue;
             }
 
-            const platformInfo = platformData.get(sku.platform)!;
+            const sku = product.platformSkus.find((entry) => entry.platform === platform);
 
-            if (sku.prices.length > 0) {
-                const price = sku.prices[0];
-                const itemTotal = parseFloat(price.price.toString()) * itemQuantity;
-
+            if (!sku) {
+                platformInfo.itemsOutOfStock += 1;
+                platformInfo.unavailableItems.push(product.name);
                 platformInfo.items.push({
                     usku: product.usku,
                     name: product.name,
-                    quantity: itemQuantity,
-                    price: parseFloat(price.price.toString()),
-                    total: itemTotal,
-                    inStock: price.inStock,
+                    quantity: cartItem.quantity,
+                    price: null,
+                    total: null,
+                    available: false,
+                    status: 'unavailable',
+                    stockStatus: 'not_mapped',
+                    reason: 'No catalog mapping for this platform',
+                    lastCheckedLabel: 'Catalog mapping missing',
+                    confidence: 'low',
                 });
-
-                if (price.inStock) {
-                    platformInfo.subtotal += itemTotal;
-                    platformInfo.itemsInStock += 1;
-                } else {
-                    platformInfo.itemsOutOfStock += 1;
-                    platformInfo.unavailableItems.push(product.name);
-                }
-            } else {
-                // No price data for this item on this platform
-                platformInfo.unavailableItems.push(product.name);
-                platformInfo.itemsOutOfStock += 1;
+                platformInfo.minConfidenceScore = Math.min(platformInfo.minConfidenceScore, 1);
+                continue;
             }
+
+            const latestPrice = sku.prices[0];
+
+            if (!latestPrice) {
+                platformInfo.itemsUnknown += 1;
+                platformInfo.unknownItems.push(product.name);
+                platformInfo.items.push({
+                    usku: product.usku,
+                    name: product.name,
+                    quantity: cartItem.quantity,
+                    price: null,
+                    total: null,
+                    available: false,
+                    status: 'unknown',
+                    stockStatus: 'checking_failed',
+                    reason: 'Latest platform check is unavailable',
+                    lastCheckedLabel: 'Checking failed',
+                    confidence: 'low',
+                });
+                platformInfo.minConfidenceScore = Math.min(platformInfo.minConfidenceScore, 1);
+                continue;
+            }
+
+            const ageMinutes = getAgeMinutes(latestPrice.scrapedAt);
+            const confidenceMeta = getConfidenceFromAge(ageMinutes);
+            const lastCheckedLabel = formatLastCheckedLabel(ageMinutes);
+            const numericPrice = parseFloat(latestPrice.price.toString());
+            const itemTotal = numericPrice * cartItem.quantity;
+
+            platformInfo.maxAgeMinutes = Math.max(platformInfo.maxAgeMinutes, ageMinutes);
+            platformInfo.minConfidenceScore = Math.min(platformInfo.minConfidenceScore, confidenceMeta.score);
+
+            if (latestPrice.inStock) {
+                platformInfo.subtotal += itemTotal;
+                platformInfo.itemsInStock += 1;
+                platformInfo.items.push({
+                    usku: product.usku,
+                    name: product.name,
+                    quantity: cartItem.quantity,
+                    price: numericPrice,
+                    total: itemTotal,
+                    available: true,
+                    status: 'available',
+                    stockStatus: latestPrice.stockStatus,
+                    lastCheckedAt: latestPrice.scrapedAt.toISOString(),
+                    lastCheckedLabel,
+                    confidence: confidenceMeta.confidence,
+                });
+                continue;
+            }
+
+            platformInfo.itemsOutOfStock += 1;
+            platformInfo.unavailableItems.push(product.name);
+            platformInfo.items.push({
+                usku: product.usku,
+                name: product.name,
+                quantity: cartItem.quantity,
+                price: null,
+                total: null,
+                available: false,
+                status: 'unavailable',
+                stockStatus: latestPrice.stockStatus,
+                reason:
+                    latestPrice.stockStatus === 'out_of_stock'
+                        ? 'Out of stock'
+                        : 'Not available in your area',
+                lastCheckedAt: latestPrice.scrapedAt.toISOString(),
+                lastCheckedLabel,
+                confidence: confidenceMeta.confidence,
+            });
         }
     }
 
@@ -114,7 +278,7 @@ export const compareCart = catchAsync(async (req: Request, res: Response) => {
     const cityPrefix = pincode.substring(0, 3);
     const deliveryRules = await prisma.deliveryRule.findMany({
         where: {
-            platform: { in: Array.from(platforms) },
+            platform: { in: Array.from(SUPPORTED_COMPARISON_PLATFORMS) },
             OR: [
                 { pincodePrefix: cityPrefix },
                 { pincodePrefix: null }, // Fallback rules
@@ -127,7 +291,7 @@ export const compareCart = catchAsync(async (req: Request, res: Response) => {
     // Build platform comparisons
     const platformComparisons: PlatformComparison[] = [];
 
-    for (const platform of platforms) {
+    for (const platform of SUPPORTED_COMPARISON_PLATFORMS) {
         const data = platformData.get(platform)!;
         const rule = deliveryRules.find((r) => r.platform === platform);
 
@@ -152,12 +316,34 @@ export const compareCart = catchAsync(async (req: Request, res: Response) => {
         const totalItems = items.length;
         const availabilityRate =
             totalItems > 0 ? (data.itemsInStock / totalItems) * 100 : 0;
+        const confidence =
+            data.minConfidenceScore >= 3
+                ? 'high'
+                : data.minConfidenceScore === 2
+                    ? 'medium'
+                    : 'low';
+        const allItemsAvailable = data.itemsInStock === totalItems;
+        const dataStatus =
+            data.itemsUnknown > 0
+                ? 'failed'
+                : data.maxAgeMinutes > 15
+                    ? 'stale'
+                    : 'live';
+        const lastCheckedLabel =
+            data.items.length > 0 ? formatLastCheckedLabel(data.maxAgeMinutes) : 'Checking failed';
+        const lastCheckedAt =
+            data.items
+                .map((item) => item.lastCheckedAt)
+                .filter((value): value is string => Boolean(value))
+                .sort()
+                .pop() || undefined;
 
         platformComparisons.push({
             platform,
             available: data.itemsInStock > 0,
             itemsInStock: data.itemsInStock,
             itemsOutOfStock: data.itemsOutOfStock,
+            itemsUnknown: data.itemsUnknown,
             availabilityRate: Math.round(availabilityRate),
             subtotal: data.subtotal,
             deliveryFee,
@@ -168,11 +354,23 @@ export const compareCart = catchAsync(async (req: Request, res: Response) => {
             etaMinutes: rule?.etaRangeMin || undefined,
             unavailableItems:
                 data.unavailableItems.length > 0 ? data.unavailableItems : undefined,
+            unknownItems:
+                data.unknownItems.length > 0 ? data.unknownItems : undefined,
+            items: data.items,
+            allItemsAvailable,
+            confidence,
+            confidenceScore: data.minConfidenceScore,
+            dataStatus,
+            lastCheckedAt,
+            lastCheckedLabel,
+            deliveryFeeLabel:
+                deliveryFee > 0 || platformFee > 0
+                    ? `₹${Math.round(deliveryFee + platformFee)}*`
+                    : 'Free',
         });
     }
 
-    // Sort by total price (cheapest first)
-    platformComparisons.sort((a, b) => a.total - b.total);
+    platformComparisons.sort(comparePlatforms);
 
     // Calculate savings relative to most expensive
     if (platformComparisons.length > 0) {
@@ -182,19 +380,32 @@ export const compareCart = catchAsync(async (req: Request, res: Response) => {
         });
     }
 
+    const recommendedPlatform = platformComparisons[0]?.platform || null;
     const cheapestPlatform =
-        platformComparisons.find((p) => p.available)?.platform || null;
+        [...platformComparisons]
+            .filter((p) => p.available)
+            .sort((a, b) => a.total - b.total)[0]?.platform || null;
     const fastestPlatform = platformComparisons
         .filter((p) => p.available && p.etaMinutes !== undefined)
         .sort((a, b) => (a.etaMinutes || 0) - (b.etaMinutes || 0))[0]?.platform || null;
+    const mostCompletePlatform =
+        [...platformComparisons]
+            .sort((a, b) => {
+                if (a.itemsInStock !== b.itemsInStock) {
+                    return b.itemsInStock - a.itemsInStock;
+                }
+                return a.total - b.total;
+            })[0]?.platform || null;
     const maxSavings = platformComparisons[0]?.savings || 0;
 
     const result: ComparisonResponse = {
         pincode,
         itemCount: items.length,
         platforms: platformComparisons,
+        recommendedPlatform,
         cheapestPlatform,
         fastestPlatform,
+        mostCompletePlatform,
         maxSavings,
         timestamp: new Date().toISOString(),
     };
@@ -205,14 +416,15 @@ export const compareCart = catchAsync(async (req: Request, res: Response) => {
             data: {
                 userId: userId || null,
                 itemCount: items.length,
-                itemsCompared: items,
+                itemsCompared: items as unknown as Prisma.InputJsonValue,
                 totalValueMin: platformComparisons[0]?.total || 0,
                 totalValueMax:
                     platformComparisons[platformComparisons.length - 1]?.total || 0,
-                platformsChecked: Array.from(platforms),
+                platformsChecked: Array.from(SUPPORTED_COMPARISON_PLATFORMS),
                 cheapestPlatform,
                 cheapestTotal: platformComparisons[0]?.total || 0,
                 fastestPlatform,
+                selectedPlatform: recommendedPlatform,
                 potentialSavings: maxSavings,
                 pincode,
                 comparisonType: 'cart',

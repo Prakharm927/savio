@@ -16,7 +16,7 @@ const startServer = async () => {
 
         // Start Express server
         const server = app.listen(PORT, () => {
-            logger.info(`🚀 Prixo backend running on port ${PORT}`);
+            logger.info(`🚀 Savio backend running on port ${PORT}`);
             logger.info(`📊 Environment: ${process.env.NODE_ENV || 'development'}`);
             logger.info(`🌐 Health check: http://localhost:${PORT}/health`);
         });

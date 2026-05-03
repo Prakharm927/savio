@@ -1,352 +1,261 @@
 import { PrismaClient } from '@prisma/client';
+import { MASTER_CATALOG_ENTRIES } from '../src/data/masterCatalog';
 
 const prisma = new PrismaClient();
 
+const DEFAULT_PINCODE = '560001';
+
+const PLATFORM_PRICE_OFFSETS = {
+  amazon: 4,
+  bigbasket: -1,
+  flipkart: 3,
+  jiomart: 2,
+} as const;
+
+const PLATFORM_DELIVERY_RULES = [
+  {
+    platform: 'bigbasket',
+    city: 'Bangalore',
+    pincodePrefix: '560',
+    freeDeliveryThreshold: 199,
+    baseDeliveryFee: 35,
+    platformFee: 8,
+    typicalEtaLabel: 'Delivers in 18-30 minutes',
+    etaRangeMin: 18,
+    etaRangeMax: 30,
+    hasMembershipDiscount: true,
+    membershipTypes: ['bbstar'],
+  },
+  {
+    platform: 'jiomart',
+    city: 'Bangalore',
+    pincodePrefix: '560',
+    freeDeliveryThreshold: 299,
+    baseDeliveryFee: 25,
+    platformFee: 6,
+    typicalEtaLabel: 'Delivers in 25-40 minutes',
+    etaRangeMin: 25,
+    etaRangeMax: 40,
+    hasMembershipDiscount: false,
+    membershipTypes: [],
+  },
+  {
+    platform: 'amazon',
+    city: 'Bangalore',
+    pincodePrefix: '560',
+    freeDeliveryThreshold: 499,
+    baseDeliveryFee: 40,
+    platformFee: 0,
+    typicalEtaLabel: 'Scheduled delivery in 45-90 minutes',
+    etaRangeMin: 45,
+    etaRangeMax: 90,
+    hasMembershipDiscount: true,
+    membershipTypes: ['prime'],
+  },
+  {
+    platform: 'flipkart',
+    city: 'Bangalore',
+    pincodePrefix: '560',
+    freeDeliveryThreshold: 299,
+    baseDeliveryFee: 30,
+    platformFee: 5,
+    typicalEtaLabel: 'Delivers in 20-35 minutes',
+    etaRangeMin: 20,
+    etaRangeMax: 35,
+    hasMembershipDiscount: false,
+    membershipTypes: [],
+  },
+  {
+    platform: 'zepto',
+    city: 'Bangalore',
+    pincodePrefix: '560',
+    freeDeliveryThreshold: 199,
+    baseDeliveryFee: 25,
+    platformFee: 3,
+    typicalEtaLabel: 'Delivers in 10-20 minutes',
+    etaRangeMin: 10,
+    etaRangeMax: 20,
+    hasMembershipDiscount: false,
+    membershipTypes: [],
+  },
+];
+
+function toTitleCaseCategory(value: string) {
+  return value.trim();
+}
+
+function buildTags(entry: (typeof MASTER_CATALOG_ENTRIES)[number]) {
+  return Array.from(
+    new Set(
+      [
+        entry.category,
+        entry.subcategory,
+        entry.brand,
+        entry.unit,
+        ...entry.name.split(' '),
+      ]
+        .filter(Boolean)
+        .map((tag) => String(tag).toLowerCase())
+    )
+  );
+}
+
+function buildPlatformPrice(priceHint: number, platform: keyof typeof PLATFORM_PRICE_OFFSETS) {
+  return Math.max(1, priceHint + PLATFORM_PRICE_OFFSETS[platform]);
+}
+
+function buildProductDescription(entry: (typeof MASTER_CATALOG_ENTRIES)[number]) {
+  if (entry.name.toLowerCase().startsWith(entry.brand.toLowerCase())) {
+    return `${entry.name} available for Savio grocery comparison.`;
+  }
+
+  return `${entry.brand} ${entry.name} available for Savio grocery comparison.`;
+}
+
 async function main() {
-    console.log('🌱 Seeding database...');
+  console.log('🌱 Seeding Savio real catalog...');
 
-    // Clear existing data
-    await prisma.comparisonHistory.deleteMany();
-    await prisma.savedListItem.deleteMany();
-    await prisma.savedList.deleteMany();
-    await prisma.userFavorite.deleteMany();
-    await prisma.userCart.deleteMany();
-    await prisma.priceLatest.deleteMany();
-    await prisma.platformSku.deleteMany();
-    await prisma.savioProduct.deleteMany();
-    await prisma.deliveryRule.deleteMany();
-    await prisma.user.deleteMany();
+  await prisma.comparisonHistory.deleteMany();
+  await prisma.savedListItem.deleteMany();
+  await prisma.savedList.deleteMany();
+  await prisma.userFavorite.deleteMany();
+  await prisma.userCart.deleteMany();
+  await prisma.priceLatest.deleteMany();
+  await prisma.platformSku.deleteMany();
+  await prisma.savioProduct.deleteMany();
+  await prisma.deliveryRule.deleteMany();
+  await prisma.user.deleteMany();
 
-    console.log('✅ Cleared existing data');
+  console.log('✅ Cleared existing data');
 
-    // Create users
-    const user1 = await prisma.user.create({
-        data: {
-            phoneNumber: '+919876543210',
-            email: 'test@prixo.com',
-            fullName: 'Test User',
-            defaultPincode: '560001',
-            defaultCity: 'Bangalore',
-            preferredPlatforms: ['bigbasket', 'amazon'],
-            hasPrime: true,
-        },
-    });
+  const user = await prisma.user.create({
+    data: {
+      phoneNumber: '+919876543210',
+      email: 'test@savio.app',
+      fullName: 'Test User',
+      defaultPincode: DEFAULT_PINCODE,
+      defaultCity: 'Bangalore',
+      preferredPlatforms: ['bigbasket', 'jiomart', 'amazon', 'flipkart'],
+      hasPrime: true,
+      hasBBStar: true,
+    },
+  });
 
-    console.log('✅ Created test users');
+  console.log('✅ Created test user');
 
-    // Create products
-    const products = [
-        {
-            usku: 'USKU-MILK-001',
-            name: 'Amul Taaza Toned Milk',
-            normalizedName: 'amul taaza toned milk',
-            brand: 'Amul',
-            category: 'dairy',
-            subcategory: 'milk',
-            quantity: 1.0,
-            unit: 'L',
-            normalizedQuantity: 1.0,
-            variant: 'toned',
-            primaryImageUrl: 'https://via.placeholder.com/200x200?text=Amul+Milk',
-            popularityScore: 100,
-        },
-        {
-            usku: 'USKU-BREAD-001',
-            name: 'Britannia Bread - Whole Wheat',
-            normalizedName: 'britannia bread whole wheat',
-            brand: 'Britannia',
-            category: 'bakery',
-            subcategory: 'bread',
-            quantity: 400,
-            unit: 'g',
-            normalizedQuantity: 0.4,
-            variant: 'whole wheat',
-            primaryImageUrl: 'https://via.placeholder.com/200x200?text=Britannia+Bread',
-            popularityScore: 90,
-        },
-        {
-            usku: 'USKU-RICE-001',
-            name: 'India Gate Basmati Rice',
-            normalizedName: 'india gate basmati rice',
-            brand: 'India Gate',
-            category: 'staples',
-            subcategory: 'rice',
-            quantity: 5.0,
-            unit: 'kg',
-            normalizedQuantity: 5.0,
-            variant: 'basmati',
-            primaryImageUrl: 'https://via.placeholder.com/200x200?text=India+Gate+Rice',
-            popularityScore: 85,
-        },
-        {
-            usku: 'USKU-OIL-001',
-            name: 'Fortune Sunflower Oil',
-            normalizedName: 'fortune sunflower oil',
-            brand: 'Fortune',
-            category: 'staples',
-            subcategory: 'oil',
-            quantity: 1.0,
-            unit: 'L',
-            normalizedQuantity: 1.0,
-            variant: 'refined',
-            primaryImageUrl: 'https://via.placeholder.com/200x200?text=Fortune+Oil',
-            popularityScore: 80,
-        },
-        {
-            usku: 'USKU-COFFEE-001',
-            name: 'Nescafe Classic Coffee',
-            normalizedName: 'nescafe classic coffee',
-            brand: 'Nescafe',
-            category: 'beverages',
-            subcategory: 'coffee',
-            quantity: 200,
-            unit: 'g',
-            normalizedQuantity: 0.2,
-            variant: 'instant',
-            primaryImageUrl: 'https://via.placeholder.com/200x200?text=Nescafe',
-            popularityScore: 75,
-        },
-    ];
+  const catalogProducts = MASTER_CATALOG_ENTRIES.map((entry, index) => ({
+    usku: entry.usku,
+    name: entry.name,
+    normalizedName: entry.normalizedName,
+    brand: entry.brand,
+    category: toTitleCaseCategory(entry.category),
+    subcategory: entry.subcategory || null,
+    tags: buildTags(entry),
+    quantity: entry.quantity ?? null,
+    unit: entry.unit ?? null,
+    normalizedQuantity: entry.normalizedQuantity ?? null,
+    variant: entry.variant || null,
+    description: buildProductDescription(entry),
+    ingredients: null,
+    nutritionInfo: null,
+    primaryImageUrl: entry.image,
+    additionalImages: [],
+    qualityScore: 86,
+    popularityScore: Math.max(50, 100 - index),
+    isActive: true,
+  }));
 
-    await prisma.savioProduct.createMany({ data: products });
-    console.log('✅ Created 5 sample products');
+  await prisma.savioProduct.createMany({ data: catalogProducts });
+  console.log(`✅ Created ${catalogProducts.length} master catalog products`);
 
-    // Create platform SKUs
-    const platformSkus = await prisma.platformSku.createMany({
-        data: [
-            // Amul Milk
-            {
-                usku: 'USKU-MILK-001',
-                platform: 'bigbasket',
-                platformSkuId: 'BB-40001234',
-                matchConfidence: 0.95,
-                matchType: 'exact',
-            },
-            {
-                usku: 'USKU-MILK-001',
-                platform: 'amazon',
-                platformSkuId: 'AMZ-B08XYZ1234',
-                matchConfidence: 0.92,
-                matchType: 'fuzzy',
-            },
-            {
-                usku: 'USKU-MILK-001',
-                platform: 'blinkit',
-                platformSkuId: 'BLKT-123456',
-                matchConfidence: 0.90,
-                matchType: 'fuzzy',
-            },
+  const platformSkuRows = MASTER_CATALOG_ENTRIES.flatMap((entry) =>
+    (Object.keys(PLATFORM_PRICE_OFFSETS) as Array<keyof typeof PLATFORM_PRICE_OFFSETS>).map((platform) => ({
+      usku: entry.usku,
+      platform,
+      platformSkuId: `${platform.toUpperCase()}-${entry.usku}`,
+      platformProductUrl: entry.platformLinks[platform] || null,
+      platformName: entry.name,
+      matchConfidence: 0.92,
+      matchType: entry.platformLinks[platform] ? 'exact' : 'catalog-search',
+      normalizedUnitPrice:
+        typeof entry.normalizedQuantity === 'number' && entry.normalizedQuantity > 0
+          ? Number((buildPlatformPrice(entry.priceHint, platform) / entry.normalizedQuantity).toFixed(2))
+          : null,
+      isActive: true,
+      lastSeenAt: new Date(),
+      consecutive404Count: 0,
+    }))
+  );
 
-            // Britannia Bread
-            {
-                usku: 'USKU-BREAD-001',
-                platform: 'bigbasket',
-                platformSkuId: 'BB-40005678',
-                matchConfidence: 0.98,
-                matchType: 'exact',
-            },
-            {
-                usku: 'USKU-BREAD-001',
-                platform: 'amazon',
-                platformSkuId: 'AMZ-B08ABC5678',
-                matchConfidence: 0.85,
-                matchType: 'semantic',
-            },
-            {
-                usku: 'USKU-BREAD-001',
-                platform: 'blinkit',
-                platformSkuId: 'BLKT-789012',
-                matchConfidence: 0.93,
-                matchType: 'exact',
-            },
+  await prisma.platformSku.createMany({ data: platformSkuRows });
+  console.log(`✅ Created ${platformSkuRows.length} platform SKU mappings`);
 
-            // Rice
-            {
-                usku: 'USKU-RICE-001',
-                platform: 'bigbasket',
-                platformSkuId: 'BB-40009012',
-                matchConfidence: 0.96,
-                matchType: 'exact',
-            },
-            {
-                usku: 'USKU-RICE-001',
-                platform: 'amazon',
-                platformSkuId: 'AMZ-B08DEF9012',
-                matchConfidence: 0.94,
-                matchType: 'exact',
-            },
+  const platformSkus = await prisma.platformSku.findMany({
+    select: {
+      id: true,
+      usku: true,
+      platform: true,
+    },
+  });
 
-            // Oil
-            {
-                usku: 'USKU-OIL-001',
-                platform: 'bigbasket',
-                platformSkuId: 'BB-40003456',
-                matchConfidence: 0.97,
-                matchType: 'exact',
-            },
-            {
-                usku: 'USKU-OIL-001',
-                platform: 'blinkit',
-                platformSkuId: 'BLKT-345678',
-                matchConfidence: 0.91,
-                matchType: 'fuzzy',
-            },
+  const entryByUsku = new Map(MASTER_CATALOG_ENTRIES.map((entry) => [entry.usku, entry]));
 
-            // Coffee
-            {
-                usku: 'USKU-COFFEE-001',
-                platform: 'bigbasket',
-                platformSkuId: 'BB-40007890',
-                matchConfidence: 0.99,
-                matchType: 'exact',
-            },
-            {
-                usku: 'USKU-COFFEE-001',
-                platform: 'amazon',
-                platformSkuId: 'AMZ-B08GHI7890',
-                matchConfidence: 0.96,
-                matchType: 'exact',
-            },
-            {
-                usku: 'USKU-COFFEE-001',
-                platform: 'blinkit',
-                platformSkuId: 'BLKT-901234',
-                matchConfidence: 0.88,
-                matchType: 'fuzzy',
-            },
-        ],
-    });
+  const priceRows = platformSkus.map((sku) => {
+    const entry = entryByUsku.get(sku.usku);
+    if (!entry) {
+      throw new Error(`Missing catalog entry for ${sku.usku}`);
+    }
 
-    console.log('✅ Created platform SKU mappings');
+    const platform = sku.platform as keyof typeof PLATFORM_PRICE_OFFSETS;
+    const price = buildPlatformPrice(entry.priceHint, platform);
+    const mrp = Math.max(price + 4, entry.priceHint + 8);
+    const discountPercent = Number((((mrp - price) / mrp) * 100).toFixed(2));
 
-    // Fetch platform SKU IDs for price creation
-    const allPlatformSkus = await prisma.platformSku.findMany();
+    return {
+      platformSkuId: sku.id,
+      pincode: DEFAULT_PINCODE,
+      price,
+      mrp,
+      discountPercent,
+      inStock: true,
+      stockStatus: 'in_stock',
+      confidenceScore: 0.9,
+      dataSource: 'seed',
+      scrapedAt: new Date(),
+      expiresAt: new Date(Date.now() + 30 * 60 * 1000),
+    };
+  });
 
-    // Create prices for Bangalore (560001)
-    const prices = allPlatformSkus.map((sku) => {
-        let price = 0;
-        let mrp = 0;
+  await prisma.priceLatest.createMany({ data: priceRows });
+  console.log(`✅ Created ${priceRows.length} live price rows`);
 
-        // Set realistic prices based on product
-        if (sku.usku === 'USKU-MILK-001') {
-            // Milk prices
-            price = sku.platform === 'bigbasket' ? 56 : sku.platform === 'amazon' ? 58 : 54;
-            mrp = 60;
-        } else if (sku.usku === 'USKU-BREAD-001') {
-            // Bread prices
-            price = sku.platform === 'bigbasket' ? 35 : sku.platform === 'amazon' ? 38 : 32;
-            mrp = 40;
-        } else if (sku.usku === 'USKU-RICE-001') {
-            // Rice prices
-            price = sku.platform === 'bigbasket' ? 485 : 495;
-            mrp = 550;
-        } else if (sku.usku === 'USKU-OIL-001') {
-            // Oil prices
-            price = sku.platform === 'bigbasket' ? 165 : 160;
-            mrp = 180;
-        } else if (sku.usku === 'USKU-COFFEE-001') {
-            // Coffee prices
-            price = sku.platform === 'bigbasket' ? 285 : sku.platform === 'amazon' ? 290 : 280;
-            mrp = 320;
-        }
+  await prisma.deliveryRule.createMany({ data: PLATFORM_DELIVERY_RULES });
+  console.log(`✅ Created ${PLATFORM_DELIVERY_RULES.length} delivery rules`);
 
-        const discountPercent = mrp > 0 ? ((mrp - price) / mrp) * 100 : 0;
+  const starterCartUs = MASTER_CATALOG_ENTRIES.slice(0, 6);
+  await prisma.userCart.createMany({
+    data: starterCartUs.map((entry, index) => ({
+      userId: user.id,
+      usku: entry.usku,
+      quantity: index < 2 ? 2 : 1,
+    })),
+  });
 
-        return {
-            platformSkuId: sku.id,
-            pincode: '560001',
-            price,
-            mrp,
-            discountPercent: Math.round(discountPercent * 100) / 100,
-            inStock: true,
-            stockStatus: 'in_stock',
-            scrapedAt: new Date(),
-            expiresAt: new Date(Date.now() + 15 * 60 * 1000), // Expires in 15 minutes
-        };
-    });
+  console.log('✅ Added starter cart items');
 
-    await prisma.priceLatest.createMany({ data: prices });
-    console.log('✅ Created price data for Bangalore (560001)');
-
-    // Create delivery rules
-    await prisma.deliveryRule.createMany({
-        data: [
-            {
-                platform: 'bigbasket',
-                city: 'Bangalore',
-                pincodePrefix: '560',
-                freeDeliveryThreshold: 200,
-                baseDeliveryFee: 40,
-                platformFee: 10,
-                typicalEtaLabel: 'Usually delivers in 2-3 hours',
-                etaRangeMin: 120,
-                etaRangeMax: 180,
-                hasMembershipDiscount: true,
-                membershipTypes: ['bbstar'],
-            },
-            {
-                platform: 'amazon',
-                city: 'Bangalore',
-                pincodePrefix: '560',
-                freeDeliveryThreshold: 499,
-                baseDeliveryFee: 50,
-                platformFee: 0,
-                typicalEtaLabel: 'Delivers tomorrow',
-                etaRangeMin: 1440,
-                etaRangeMax: 2880,
-                hasMembershipDiscount: true,
-                membershipTypes: ['prime'],
-            },
-            {
-                platform: 'blinkit',
-                city: 'Bangalore',
-                pincodePrefix: '560',
-                freeDeliveryThreshold: 99,
-                baseDeliveryFee: 25,
-                platformFee: 5,
-                typicalEtaLabel: 'Delivers in 10-15 minutes',
-                etaRangeMin: 10,
-                etaRangeMax: 15,
-                hasMembershipDiscount: false,
-                membershipTypes: [],
-            },
-        ],
-    });
-
-    console.log('✅ Created delivery rules');
-
-    // Add items to user cart
-    await prisma.userCart.createMany({
-        data: [
-            { userId: user1.id, usku: 'USKU-MILK-001', quantity: 2 },
-            { userId: user1.id, usku: 'USKU-BREAD-001', quantity: 1 },
-            { userId: user1.id, usku: 'USKU-COFFEE-001', quantity: 1 },
-        ],
-    });
-
-    console.log('✅ Added items to user cart');
-
-    console.log('\n🎉 Database seeded successfully!');
-    console.log('\n📊 Summary:');
-    console.log('   - Users: 1');
-    console.log('   - Products: 5');
-    console.log('   - Platform SKUs: 13');
-    console.log('   - Prices: 13 (for Bangalore 560001)');
-    console.log('   - Delivery Rules: 3');
-    console.log('   - Cart Items: 3');
-    console.log('\n💡 Try these queries:');
-    console.log('   - GET http://localhost:3000/api/products');
-    console.log('   - GET http://localhost:3000/api/products/USKU-MILK-001/prices?pincode=560001');
-    console.log('   - POST http://localhost:3000/api/comparison');
-    console.log('     Body: {"items": [{"usku": "USKU-MILK-001", "quantity": 2}], "pincode": "560001"}');
+  console.log('\n🎉 Savio catalog seeded successfully');
+  console.log(`   - Products: ${catalogProducts.length}`);
+  console.log(`   - Platform SKUs: ${platformSkuRows.length}`);
+  console.log(`   - Price rows: ${priceRows.length}`);
+  console.log(`   - Default pincode: ${DEFAULT_PINCODE}`);
 }
 
 main()
-    .then(async () => {
-        await prisma.$disconnect();
-    })
-    .catch(async (e) => {
-        console.error('❌ Seeding error:', e);
-        await prisma.$disconnect();
-        process.exit(1);
-    });
+  .then(async () => {
+    await prisma.$disconnect();
+  })
+  .catch(async (error) => {
+    console.error('❌ Seeding error:', error);
+    await prisma.$disconnect();
+    process.exit(1);
+  });

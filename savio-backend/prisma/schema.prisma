@@ -346,3 +346,39 @@ model ComparisonHistory {
   @@index([createdAt])
   @@map("comparison_history")
 }
+
+// ========================================
+// PARSER CONFIG (Remote config management)
+// ========================================
+
+enum ParserPlatform {
+  zepto
+  blinkit
+  instamart
+  bigbasket
+  jiomart
+  amazon
+  flipkart
+}
+
+model ParserConfig {
+  id          String         @id @default(uuid())
+
+  platform    ParserPlatform
+  version     Int
+
+  // Config payload — selector definitions, regex patterns, ignore rules
+  config      Json           // { selectors: {}, patterns: {}, ignore: [] }
+  notes       String?        @db.Text
+
+  // Only one active config per platform at a time
+  isActive    Boolean        @default(false) @map("is_active")
+
+  // Timestamps
+  createdAt   DateTime       @default(now()) @map("created_at")
+  updatedAt   DateTime       @updatedAt @map("updated_at")
+
+  @@unique([platform, version])
+  @@index([platform, isActive])
+  @@map("parser_configs")
+}
