@@ -22,9 +22,10 @@ const corsOptions = {
 };
 app.use(cors(corsOptions));
 
-// Body parser
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+// Body parser — JSON_BODY_LIMIT raised for structured accessibility tree dumps (~2–5 MB)
+const bodyLimit = process.env.JSON_BODY_LIMIT || '10mb';
+app.use(express.json({ limit: bodyLimit }));
+app.use(express.urlencoded({ extended: true, limit: bodyLimit }));
 
 // Production-grade rate limiting
 if (process.env.NODE_ENV === 'production') {
