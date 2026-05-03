@@ -382,3 +382,24 @@ model ParserConfig {
   @@index([platform, isActive])
   @@map("parser_configs")
 }
+
+// ========================================
+// RAW CAPTURE ARCHIVE (append-only, 30-day TTL)
+// ========================================
+
+model AccessibilitySnapshot {
+  id            String   @id @default(uuid())
+  platform      String
+  packageName   String   @map("package_name")
+  pincode       String
+  capturedAt    DateTime @map("captured_at")
+  dump          Json
+  parsedCount   Int      @map("parsed_count")
+  parserVersion String   @map("parser_version")
+  createdAt     DateTime @default(now()) @map("created_at")
+  expiresAt     DateTime @map("expires_at")
+
+  @@index([platform, pincode, capturedAt])
+  @@index([expiresAt])
+  @@map("accessibility_snapshots")
+}

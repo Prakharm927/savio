@@ -8,6 +8,10 @@
  * Pure extraction — no database access, no performAction calls.
  */
 
+// Bump when selector logic or extracted fields change — stored in AccessibilitySnapshot
+// for re-parse auditing.
+export const ZEPTO_PARSER_VERSION = 'zepto-v1';
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 export interface AccessibilityNode {
@@ -195,6 +199,13 @@ function scanChildTextViews(container: AccessibilityNode): {
 
 export function parseZeptoTree(dump: ZeptoTreeDump): ZeptoParseResult {
     const warnings: string[] = [];
+
+    if (!dump.root) {
+        return {
+            platform: 'zepto', packageName: dump.packageName,
+            capturedAt: dump.capturedAt, products: [], warnings: ['root is null'],
+        };
+    }
 
     if (dump.packageName !== EXPECTED_PACKAGE) {
         warnings.push(

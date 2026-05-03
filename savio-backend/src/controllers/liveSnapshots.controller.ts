@@ -3,6 +3,11 @@ import prisma from '../config/database';
 import { invalidateCache } from '../config/redis';
 import { catchAsync } from '../utils/catchAsync';
 import { sendSuccess, sendError } from '../utils/response';
+import { parseZeptoTree, ZeptoTreeDump, ZEPTO_PARSER_VERSION } from '../parsers/zepto.parser';
+import logger from '../utils/logger';
+
+const RAW_DUMP_TTL_DAYS = 30;
+const RAW_DUMP_CLEANUP_PROBABILITY = 0.01;
 
 type LivePlatform = 'zepto';
 type SnapshotConfidence = 'high' | 'medium' | 'low';
@@ -125,20 +130,43 @@ export const ingestZeptoSnapshot = catchAsync(async (req: Request, res: Response
         packageName,
         capturedAt,
         products,
+        treeDump,
     }: {
         platform?: LivePlatform;
         pincode?: string;
         packageName?: string;
         capturedAt?: number;
         products?: LiveSnapshotProduct[];
+        treeDump?: ZeptoTreeDump;
     } = req.body;
 
     if (!SUPPORTED_LIVE_PLATFORMS.includes(platform)) {
         return sendError(res, 'Unsupported live snapshot platform', 400);
     }
 
-    if (!Array.isArray(products) || products.length === 0) {
-        return sendError(res, 'Snapshot products array is required', 400);
+    // ── Source resolution ─────────────────────────────────────────────────────
+    let resolvedProducts: LiveSnapshotProduct[];
+    let source: 'treeDump' | 'products';
+
+    if (treeDump) {
+        if (treeDump.packageName && treeDump.packageName !== 'com.zeptoconsumerapp') {
+            return sendError(res, `Unexpected packageName in treeDump: "${treeDump.packageName}"`, 400);
+        }
+        const parsed = parseZeptoTree(treeDump);
+        resolvedProducts = parsed.products.map((p) => ({
+            name: p.name,
+            price: p.price ?? undefined,
+            mrp: p.mrp ?? undefined,
+            available: p.available,
+            stockStatus: p.stockStatus,
+            confidence: p.confidence,
+        }));
+        source = 'treeDump';
+    } else if (Array.isArray(products) && products.length > 0) {
+        resolvedProducts = products;
+        source = 'products';
+    } else {
+        return sendError(res, 'Either treeDump or a non-empty products array is required', 400);
     }
 
     if (!/^\d{6}$/.test(pincode)) {
@@ -170,7 +198,7 @@ export const ingestZeptoSnapshot = catchAsync(async (req: Request, res: Response
         reason?: string;
     }> = [];
 
-    for (const candidate of products.slice(0, 80)) {
+    for (const candidate of resolvedProducts.slice(0, 80)) {
         const inputName = (candidate.name || '').trim();
         const price = Number(candidate.price);
 
@@ -285,6 +313,38 @@ export const ingestZeptoSnapshot = catchAsync(async (req: Request, res: Response
         invalidateCache(`comparison:*:${pincode}`),
     ]);
 
+    // ── Raw dump archival (fire-and-forget) ────────────────────────────────────
+    if (treeDump) {
+        const capturedDate =
+            typeof capturedAt === 'number' && capturedAt > 0 ? new Date(capturedAt) : new Date();
+        const dumpExpiresAt = new Date(capturedDate.getTime() + RAW_DUMP_TTL_DAYS * 86_400_000);
+        prisma.accessibilitySnapshot
+            .create({
+                data: {
+                    platform,
+                    packageName: treeDump.packageName ?? packageName ?? platform,
+                    pincode,
+                    capturedAt: capturedDate,
+                    dump: treeDump as object,
+                    parsedCount: resolvedProducts.length,
+                    parserVersion: ZEPTO_PARSER_VERSION,
+                    expiresAt: dumpExpiresAt,
+                },
+            })
+            .catch((error: unknown) =>
+                logger.error('AccessibilitySnapshot write failed', {
+                    platform, packageName, capturedAt, error,
+                }),
+            );
+    }
+
+    // ── Probabilistic TTL cleanup (fire-and-forget) ────────────────────────────
+    if (Math.random() < RAW_DUMP_CLEANUP_PROBABILITY) {
+        prisma.accessibilitySnapshot
+            .deleteMany({ where: { expiresAt: { lt: new Date() } } })
+            .catch(() => undefined);
+    }
+
     const matched = results.filter((result) => result.status === 'matched').length;
 
     sendSuccess(res, {
@@ -293,5 +353,6 @@ export const ingestZeptoSnapshot = catchAsync(async (req: Request, res: Response
         matched,
         skipped: results.length - matched,
         results,
+        source,
     }, 'Live Zepto snapshot ingested');
 });
